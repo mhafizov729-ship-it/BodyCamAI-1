@@ -77,6 +77,7 @@ private fun BodyCamApp() {
     val sensorDiscovery = remember { ExternalSensorDiscovery(context) }
     val performanceMonitor = remember { PerformanceMonitor(context) }
     val adaptivePerformance = remember { AdaptivePerformanceController() }
+    var discoveredSources by remember { mutableStateOf<Map<SensorSource, FusionSource>>(emptyMap()) }
 
     DisposableEffect(Unit) {
         telemetryManager.start()
@@ -116,7 +117,6 @@ private fun BodyCamApp() {
     val fusionPipeline = remember { com.example.bodycamai.core.SensorFusionPipeline(maxDeltaMs = 120L) }
     val aiSmoother = remember { AiTrackingSmoother() }
     val fusedFrameState by fusionPipeline.state.collectAsState()
-    var discoveredSources by remember { mutableStateOf<Map<SensorSource, FusionSource>>(emptyMap()) }
     var performanceState by remember { mutableStateOf(adaptivePerformance.decide(performanceMonitor.snapshot())) }
 
     val fusion = remember(visionMode, tracking, worldMarkers, rearView, audioDirection, minimap, connectedSources, discoveredSources, fusedFrameState.health) {
@@ -228,6 +228,7 @@ private fun BodyCamApp() {
         cameraError?.let { error ->
             AlertDialog(onDismissRequest = { cameraError = null }, title = { Text("Ошибка камеры") }, text = { Text(error) }, confirmButton = { TextButton({ cameraError = null }) { Text("Понятно") } })
         }
+    }
     }
 }
 

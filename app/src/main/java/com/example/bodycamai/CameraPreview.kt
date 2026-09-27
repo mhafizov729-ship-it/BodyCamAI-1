@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.MediaStore
 import androidx.camera.core.CameraSelector
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
@@ -29,6 +30,7 @@ import com.example.bodycamai.core.SensorFrame
 import com.example.bodycamai.core.SensorFusionPipeline
 import com.example.bodycamai.core.SensorSource
 import com.example.bodycamai.p2p.LiveStreamBridge
+import com.example.bodycamai.sensors.adapters.ExternalCameraController
 import com.example.bodycamai.recording.RecordingRecovery
 import com.example.bodycamai.recording.RecordingRetentionManager
 
