@@ -17,6 +17,7 @@ import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.video.AudioConfig
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -24,7 +25,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.bodycamai.core.AiFrameResult
+import com.example.bodycamai.core.SensorFrame
+import com.example.bodycamai.core.SensorFusionPipeline
+import com.example.bodycamai.core.SensorSource
 import com.example.bodycamai.p2p.LiveStreamBridge
+import com.example.bodycamai.recording.RecordingRecovery
+import com.example.bodycamai.recording.RecordingRetentionManager
 
 @Composable
 fun CameraPreview(
@@ -32,11 +38,17 @@ fun CameraPreview(
     onRecordingChanged: (Boolean) -> Unit,
     onError: (Throwable) -> Unit,
     onAiResult: (AiFrameResult) -> Unit,
-    onCaptureIdChanged: (String?) -> Unit = {}
+    onCaptureIdChanged: (String?) -> Unit = {},
+    frontCamera: Boolean = false,
+    externalCamera: Boolean = false,
+    fusionPipeline: SensorFusionPipeline? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val aiEngine = remember { OfflineAiEngine() }
+    val externalController = remember { ExternalCameraController(context) }
+    val recordingRecovery = remember { RecordingRecovery(context) }
+    val retentionManager = remember { RecordingRetentionManager(context.contentResolver) }
     val controller = remember {
         LifecycleCameraController(context).apply {
             cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
@@ -52,6 +64,15 @@ fun CameraPreview(
         val executor = ContextCompat.getMainExecutor(context)
         controller.setImageAnalysisAnalyzer(executor, ImageAnalysis.Analyzer { imageProxy ->
             val mediaImage = imageProxy.image
+            fusionPipeline?.offer(
+                SensorFrame(
+                    source = SensorSource.PHONE_CAMERA,
+                    timestampNs = imageProxy.imageInfo.timestamp,
+                    width = imageProxy.width,
+                    height = imageProxy.height,
+                    rotationDegrees = imageProxy.imageInfo.rotationDegrees
+                )
+            )
             if (mediaImage == null) {
                 imageProxy.close()
                 return@Analyzer
@@ -73,6 +94,21 @@ fun CameraPreview(
             controller.unbind()
             aiEngine.close()
             RecordingBridge.clear()
+        }
+    }
+
+    LaunchedEffect(frontCamera, externalCamera) {
+        if (externalCamera) {
+            runCatching {
+                val future = ProcessCameraProvider.getInstance(context)
+                future.addListener({
+                    val provider = future.get()
+                    val selector = externalController.selector(provider)
+                    if (selector != null) controller.cameraSelector = selector
+                }, ContextCompat.getMainExecutor(context))
+            }.onFailure(onError)
+        } else {
+            controller.cameraSelector = if (frontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
         }
     }
 
@@ -120,12 +156,16 @@ fun CameraPreview(
                     when (event) {
                         is VideoRecordEvent.Start -> {
                             onCaptureIdChanged(captureId)
+                            recordingRecovery.markStarted(captureId)
                             onRecordingChanged(true)
                         }
                         is VideoRecordEvent.Finalize -> {
                             onRecordingChanged(false)
+                            recordingRecovery.markFinished()
                             onCaptureIdChanged(null)
-                            if (event.error != VideoRecordEvent.Finalize.ERROR_NONE) {
+                            if (event.error == VideoRecordEvent.Finalize.ERROR_NONE) {
+                                runCatching { retentionManager.trim(50) }
+                            } else {
                                 onError(IllegalStateException("Ошибка сохранения видео: ${event.error}"))
                             }
                         }

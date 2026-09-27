@@ -1,0 +1,10 @@
+{
+  "language": "en",
+  "strings": {
+    "start": "Start monitoring",
+    "camera": "Camera",
+    "sensors": "Sensors",
+    "ai": "AI",
+    "stop": "Stop"
+  }
+}

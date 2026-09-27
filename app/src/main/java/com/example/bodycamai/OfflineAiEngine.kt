@@ -1,5 +1,6 @@
 package com.example.bodycamai
 
+import android.graphics.Bitmap
 import android.media.Image
 import com.example.bodycamai.core.AiFrameResult
 import com.example.bodycamai.core.DetectionBox
@@ -44,20 +45,62 @@ class OfflineAiEngine {
                                     bounds = obj.boundingBox,
                                     trackingId = obj.trackingId
                                 )
+                            } + faces.map { face ->
+                                DetectionBox(
+                                    label = "Лицо",
+                                    confidence = 1f,
+                                    bounds = face.boundingBox,
+                                    trackingId = face.trackingId
+                                )
                             },
                             faceCount = faces.size,
-                            text = text.text
+                            text = text.text,
+                            frameWidth = input.width,
+                            frameHeight = input.height
                         )
                     )
                 }.addOnFailureListener {
-                    callback(AiFrameResult(faceCount = faces.size))
+                    callback(AiFrameResult(faceCount = faces.size, frameWidth = input.width, frameHeight = input.height))
                 }
             }.addOnFailureListener {
-                callback(AiFrameResult())
+                callback(AiFrameResult(frameWidth = input.width, frameHeight = input.height))
             }
         }.addOnFailureListener {
-            callback(AiFrameResult())
+            callback(AiFrameResult(frameWidth = input.width, frameHeight = input.height))
         }
+    }
+
+    fun analyze(bitmap: Bitmap, rotation: Int = 0, callback: (AiFrameResult) -> Unit) {
+        val input = InputImage.fromBitmap(bitmap, rotation)
+        objectDetector.process(input).addOnSuccessListener { objects ->
+            faceDetector.process(input).addOnSuccessListener { faces ->
+                textRecognizer.process(input).addOnSuccessListener { text ->
+                    callback(
+                        AiFrameResult(
+                            objects = objects.map { obj ->
+                                DetectionBox(
+                                    label = obj.labels.firstOrNull()?.text ?: "Объект",
+                                    confidence = obj.labels.firstOrNull()?.confidence ?: 0f,
+                                    bounds = obj.boundingBox,
+                                    trackingId = obj.trackingId
+                                )
+                            } + faces.map { face ->
+                                DetectionBox(
+                                    label = "Лицо",
+                                    confidence = 1f,
+                                    bounds = face.boundingBox,
+                                    trackingId = face.trackingId
+                                )
+                            },
+                            faceCount = faces.size,
+                            text = text.text,
+                            frameWidth = input.width,
+                            frameHeight = input.height
+                        )
+                    )
+                }.addOnFailureListener { callback(AiFrameResult(faceCount = faces.size, frameWidth = input.width, frameHeight = input.height)) }
+            }.addOnFailureListener { callback(AiFrameResult(frameWidth = input.width, frameHeight = input.height)) }
+        }.addOnFailureListener { callback(AiFrameResult(frameWidth = input.width, frameHeight = input.height)) }
     }
 
     fun close() {

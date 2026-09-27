@@ -7,12 +7,43 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-feature android:name="android.hardware.camera.external" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <application
         android:allowBackup="true"
         android:label="BodyCam AI"
         android:supportsRtl="true"
         android:theme="@style/Theme.BodyCamAI">
+        <receiver
+            android:name=".sensors.adapters.UsbPermissionReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".system.BodyCamWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/bodycam_widget_info" />
+        </receiver>
+        <service
+            android:name=".system.BodyCamQuickTileService"
+            android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".system.BodyCamPersistentService"
+            android:exported="false"
+            android:foregroundServiceType="camera|microphone" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

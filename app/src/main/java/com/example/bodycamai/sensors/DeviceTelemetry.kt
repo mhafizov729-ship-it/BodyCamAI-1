@@ -66,6 +66,8 @@ class DeviceTelemetryManager(context: Context) : SensorEventListener, LocationLi
         try { locationManager.removeUpdates(this) } catch (_: SecurityException) { }
     }
 
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) { }
+
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type != Sensor.TYPE_ROTATION_VECTOR) return
         val rotation = FloatArray(9)
@@ -76,8 +78,6 @@ class DeviceTelemetryManager(context: Context) : SensorEventListener, LocationLi
         if (degrees < 0f) degrees += 360f
         _state.value = _state.value.copy(headingDegrees = degrees)
     }
-
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) { }
 
     override fun onLocationChanged(location: Location) {
         _state.value = _state.value.copy(

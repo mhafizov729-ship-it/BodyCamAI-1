@@ -20,7 +20,31 @@ enum class Module(val title: String) {
 data class HudElement(val type: HudElementType, val x: Float, val y: Float, val scale: Float = 1f, val visible: Boolean = true, val alpha: Float = 1f)
 
 data class DetectionBox(val label: String, val confidence: Float, val bounds: Rect, val trackingId: Int? = null, val safetyLabel: String? = null)
-data class AiFrameResult(val objects: List<DetectionBox> = emptyList(), val faceCount: Int = 0, val text: String = "")
+enum class AiOverlayMode(val title: String) {
+    ALL("Все объекты"),
+    PEOPLE("Люди"),
+    FACES("Лица"),
+    VEHICLES("Транспорт"),
+    TEXT("Текст"),
+    HIGH_CONFIDENCE("Уверенные")
+}
+
+data class WorldMarker(
+    val label: String,
+    val confidence: Float,
+    val x: Float,
+    val y: Float,
+    val trackingId: Int? = null,
+    val source: SensorSource = SensorSource.PHONE_CAMERA
+)
+
+data class AiFrameResult(
+    val objects: List<DetectionBox> = emptyList(),
+    val faceCount: Int = 0,
+    val text: String = "",
+    val frameWidth: Int = 0,
+    val frameHeight: Int = 0
+)
 data class DiagnosticsResult(val camera: Boolean, val microphone: Boolean, val gps: Boolean, val compass: Boolean, val storage: Boolean, val ai: Boolean, val network: Boolean, val overall: Boolean)
 
 

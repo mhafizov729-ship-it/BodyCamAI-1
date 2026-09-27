@@ -7,63 +7,59 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.bodycamai.core.AppProfile
-import com.example.bodycamai.core.AiFrameResult
-import com.example.bodycamai.core.Module
-import com.example.bodycamai.core.ConnectionChannel
-import com.example.bodycamai.core.TeamMember
-import com.example.bodycamai.core.SharedTask
-import com.example.bodycamai.core.TaskStatus
-import com.example.bodycamai.core.GroupMessage
-import com.example.bodycamai.core.MessageType
-import com.example.bodycamai.core.PermissionSet
-import com.example.bodycamai.network.NetworkChannelMonitor
-import com.example.bodycamai.core.chooseBestConnection
-import com.example.bodycamai.sensors.Diagnostics
-import com.example.bodycamai.sensors.DeviceTelemetryManager
-import com.example.bodycamai.map.MapMode
-import com.example.bodycamai.map.OfflineMapManager
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bodycamai.archive.ArchiveManager
 import com.example.bodycamai.archive.ArchiveType
+import com.example.bodycamai.core.*
+import androidx.compose.runtime.CompositionLocalProvider
 import com.example.bodycamai.events.AiEventStore
+import com.example.bodycamai.map.MapMode
+import com.example.bodycamai.map.OfflineMapManager
+import com.example.bodycamai.network.NetworkChannelMonitor
+import com.example.bodycamai.sensors.DeviceTelemetryManager
+import com.example.bodycamai.sensors.Diagnostics
+import com.example.bodycamai.sensors.adapters.ExternalSensorDiscovery
+import com.example.bodycamai.localization.LocalizationManager
+import com.example.bodycamai.performance.AdaptivePerformanceController
+import com.example.bodycamai.performance.PerformanceMonitor
+import com.example.bodycamai.profile.ProfilePolicy
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.UUID
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
-import kotlin.math.roundToInt
 
-private val Cyan = Color(0xFF00E5FF)
-private val Panel = Color(0xD9141A20)
-private val Green = Color(0xFF63FF8B)
-private val Amber = Color(0xFFFFC857)
+private val Cyan @Composable get() = LocalBodyCamColors.current.primary
+private val Panel @Composable get() = LocalBodyCamColors.current.panel
+private val Panel2 @Composable get() = LocalBodyCamColors.current.panel2
+private val Green @Composable get() = LocalBodyCamColors.current.success
+private val Amber @Composable get() = LocalBodyCamColors.current.warning
+private val Red @Composable get() = LocalBodyCamColors.current.danger
+
+private enum class AppScreen { HOME, PROFILES, SENSORS, SENSOR_CENTER, AI, MAP, ARCHIVE, EVENTS, DIAGNOSTICS, SETTINGS }
 
 class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        permissionLauncher.launch(arrayOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ))
         setContent { BodyCamApp() }
     }
 }
@@ -71,457 +67,562 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun BodyCamApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val networkMonitor = remember { NetworkChannelMonitor(context) }
-    val networkState by networkMonitor.state.collectAsState()
-    DisposableEffect(networkMonitor) { onDispose { networkMonitor.close() } }
+    val preferences = remember { AppPreferences(context) }
+    val localization = remember { LocalizationManager(context) }
     val telemetryManager = remember { DeviceTelemetryManager(context) }
-    val telemetry by telemetryManager.state.collectAsState()
-    DisposableEffect(telemetryManager) { telemetryManager.start(); onDispose { telemetryManager.stop() } }
-    var recording by remember { mutableStateOf(false) }
-    var aiEnabled by remember { mutableStateOf(true) }
-    var mapEnabled by remember { mutableStateOf(true) }
-    var showMenu by remember { mutableStateOf(false) }
-    var showHud by remember { mutableStateOf(false) }
-    var showDevices by remember { mutableStateOf(false) }
-    var showDiagnostics by remember { mutableStateOf(false) }
-    var showMap by remember { mutableStateOf(false) }
-    var mapMode by remember { mutableStateOf(MapMode.TOP_DOWN) }
+    val telemetry by telemetryManager.state.collectAsStateWithLifecycle()
+    val networkMonitor = remember { NetworkChannelMonitor(context) }
+    val networkState by networkMonitor.state.collectAsStateWithLifecycle()
     val offlineMaps = remember { OfflineMapManager() }
-    var showProfiles by remember { mutableStateOf(false) }
-    var showModules by remember { mutableStateOf(false) }
-    var showLive by remember { mutableStateOf(false) }
-    var showVoice by remember { mutableStateOf(false) }
-    var showArchive by remember { mutableStateOf(false) }
-    var showEvents by remember { mutableStateOf(false) }
-    var showCommand by remember { mutableStateOf(false) }
-    var selectedProfile by remember { mutableStateOf(AppProfile.BODYCAM) }
+    val sensorDiscovery = remember { ExternalSensorDiscovery(context) }
+    val performanceMonitor = remember { PerformanceMonitor(context) }
+    val adaptivePerformance = remember { AdaptivePerformanceController() }
+
+    DisposableEffect(Unit) {
+        telemetryManager.start()
+        discoveredSources = sensorDiscovery.scan()
+        onDispose { telemetryManager.stop(); networkMonitor.close() }
+    }
+
+    var screen by remember { mutableStateOf(AppScreen.HOME) }
+    var cameraStarted by remember { mutableStateOf(false) }
+    var recording by remember { mutableStateOf(false) }
+    var aiEnabled by remember { mutableStateOf(preferences.aiEnabled()) }
+    var mapEnabled by remember { mutableStateOf(preferences.mapEnabled()) }
+    var frontCamera by remember { mutableStateOf(preferences.frontCamera()) }
+    var externalCamera by remember { mutableStateOf(false) }
+    var selectedProfile by remember { mutableStateOf(preferences.profile()) }
     var aiResult by remember { mutableStateOf(AiFrameResult()) }
-    var lastAiEventSavedAt by remember { mutableLongStateOf(0L) }
-    var activeCaptureId by remember { mutableStateOf<String?>(null) }
+    var aiOverlayMode by remember { mutableStateOf(AiOverlayMode.ALL) }
+    var aiAlert by remember { mutableStateOf<AiAlert?>(null) }
+    var aiAlertsEnabled by remember { mutableStateOf(preferences.aiAlertsEnabled()) }
+    var aiMinConfidence by remember { mutableFloatStateOf(preferences.aiMinConfidence()) }
+    var aiLabelsEnabled by remember { mutableStateOf(preferences.aiLabelsEnabled()) }
+    var aiContourOnly by remember { mutableStateOf(preferences.aiContourOnly()) }
+    val aiAlertEngine = remember(aiMinConfidence) { AiAlertEngine(preferences.aiAlertCooldownMs(), aiMinConfidence) }
+    val aiEventStore = remember { AiEventStore(context) }
     var cameraError by remember { mutableStateOf<String?>(null) }
-    val enabledModules = remember { mutableStateMapOf<Module, Boolean>().apply { Module.entries.forEach { this[it] = it in setOf(Module.AI, Module.PEOPLE, Module.VEHICLES, Module.MAP, Module.ARCHIVE, Module.EVENTS) } } }
+    var activeCaptureId by remember { mutableStateOf<String?>(null) }
+    var visionMode by remember { mutableStateOf(VisionMode.DAY) }
+    var mapMode by remember { mutableStateOf(MapMode.TOP_DOWN) }
+    var tracking by remember { mutableStateOf(true) }
+    var worldMarkers by remember { mutableStateOf(true) }
+    var rearView by remember { mutableStateOf(false) }
+    var audioDirection by remember { mutableStateOf(false) }
+    var minimap by remember { mutableStateOf(true) }
+    var showSensorSheet by remember { mutableStateOf(false) }
+    var showModeSheet by remember { mutableStateOf(false) }
+    var connectedSources by remember { mutableStateOf(setOf(SensorSource.PHONE_CAMERA)) }
+    val fusionPipeline = remember { com.example.bodycamai.core.SensorFusionPipeline(maxDeltaMs = 120L) }
+    val aiSmoother = remember { AiTrackingSmoother() }
+    val fusedFrameState by fusionPipeline.state.collectAsState()
+    var discoveredSources by remember { mutableStateOf<Map<SensorSource, FusionSource>>(emptyMap()) }
+    var performanceState by remember { mutableStateOf(adaptivePerformance.decide(performanceMonitor.snapshot())) }
 
-    MaterialTheme(colorScheme = darkColorScheme(background = Color.Black, surface = Panel, primary = Cyan)) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            CameraPreview(
-                modifier = Modifier.fillMaxSize(),
-                onRecordingChanged = { recording = it },
-                onError = { cameraError = it.message ?: "Ошибка камеры" },
-                onAiResult = { result ->
-                    if (aiEnabled) {
-                        aiResult = result
-                        val now = System.currentTimeMillis()
-                        val hasEvent = result.objects.isNotEmpty() || result.faceCount > 0 || result.text.isNotBlank()
-                        if (hasEvent && now - lastAiEventSavedAt >= 2000L) {
-                            lastAiEventSavedAt = now
-                            AiEventStore(context).add(
-                                result,
-                                timestamp = now,
-                                latitude = telemetry.latitude,
-                                longitude = telemetry.longitude,
-                                captureId = activeCaptureId
-                            )
-                        }
-                    }
-                },
-                onCaptureIdChanged = { activeCaptureId = it }
+    val fusion = remember(visionMode, tracking, worldMarkers, rearView, audioDirection, minimap, connectedSources, discoveredSources, fusedFrameState.health) {
+        val liveSources = fusedFrameState.health.filter { it.connected }.map { it.source }.toSet()
+        val sourceStates = SensorSource.entries.associateWith { source ->
+            val discovered = discoveredSources[source]
+            val enabled = source in connectedSources || source in liveSources
+            FusionSource(
+                source = source,
+                connected = enabled,
+                latencyMs = discovered?.latencyMs,
+                confidence = if (enabled) maxOf(discovered?.confidence ?: 0f, if (source in connectedSources) 1f else 0f) else 0f
             )
-            HudOverlay(recording, aiEnabled, mapEnabled, aiResult, selectedProfile.title, telemetry)
-
-            Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    StatusPill(if (recording) "● REC" else "READY", if (recording) Color.Red else Color.White)
-                    StatusPill("${selectedProfile.title} • AI ${if (aiEnabled) "ON" else "OFF"}", Cyan)
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { RecordingBridge.photo() }, Modifier.weight(1f)) { Text("PHOTO") }
-                    OutlinedButton(onClick = { aiEnabled = !aiEnabled }, Modifier.weight(1f)) { Text("AI") }
-                    Button(onClick = { if (recording) RecordingBridge.stop() else RecordingBridge.start() }, Modifier.weight(1.2f), shape = CircleShape) { Text(if (recording) "STOP" else "REC") }
-                }
-            }
-
-            GearButton(onOpen = { showMenu = true })
-
-            if (showMenu) MenuDialog(onClose = { showMenu = false }, selectedProfile, aiEnabled, mapEnabled, { aiEnabled = it }, { mapEnabled = it },
-                onHud = { showMenu = false; showHud = true }, onDevices = { showMenu = false; showDevices = true }, onProfiles = { showMenu = false; showProfiles = true },
-                onModules = { showMenu = false; showModules = true }, onCommand = { showMenu = false; showCommand = true }, onLive = { showMenu = false; showLive = true }, onVoice = { showMenu = false; showVoice = true }, onArchive = { showMenu = false; showArchive = true }, onEvents = { showMenu = false; showEvents = true }, onMap = { showMenu = false; showMap = true }, onDiagnostics = { showMenu = false; showDiagnostics = true })
-            if (showHud) HudEditor(onClose = { showHud = false })
-            if (showDevices) DevicesDialog(onClose = { showDevices = false })
-            if (showProfiles) ProfilesDialog(selectedProfile, { selectedProfile = it; showProfiles = false }, { showProfiles = false })
-            if (showModules) ModulesDialog(enabledModules, { showModules = false })
-            if (showLive) LiveViewDialog(onClose = { showLive = false })
-            if (showVoice) VoiceDialog(onClose = { showVoice = false })
-            if (showArchive) ArchiveDialog(onClose = { showArchive = false })
-            if (showEvents) AiEventsDialog(onClose = { showEvents = false })
-            if (showCommand) CommandCenterDialog(telemetry.latitude, telemetry.longitude, onClose = { showCommand = false })
-            if (showMap) MapDialog(telemetry.latitude, telemetry.longitude, telemetry.headingDegrees, mapMode, { mapMode = it }, offlineMaps, onClose = { showMap = false })
-            if (showDiagnostics) DiagnosticsDialog(onClose = { showDiagnostics = false })
-            cameraError?.let { AlertDialog(onDismissRequest = { cameraError = null }, title = { Text("Ошибка") }, text = { Text(it) }, confirmButton = { TextButton({ cameraError = null }) { Text("OK") } }) }
         }
-    }
-}
-
-@Composable private fun GearButton(onOpen: () -> Unit) {
-    Box(Modifier.fillMaxSize()) {
-        var offset by remember { mutableStateOf(Offset(0f, 0f)) }
-        var size by remember { mutableFloatStateOf(56f) }
-        Box(Modifier.offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }.align(Alignment.TopEnd).padding(top = 58.dp, end = 12.dp)
-            .size(size.dp).background(Color.Black.copy(.52f), CircleShape).border(1.dp, Cyan.copy(.75f), CircleShape)
-            .pointerInput(Unit) { detectDragGestures { change, drag -> change.consume(); offset += drag } }, contentAlignment = Alignment.Center) {
-            TextButton(onClick = onOpen, contentPadding = PaddingValues(0.dp)) { Text("⚙", color = Cyan, fontSize = (size / 2.2f).sp) }
-        }
-    }
-}
-
-@Composable private fun MenuDialog(onClose: () -> Unit, profile: AppProfile, ai: Boolean, map: Boolean, setAi: (Boolean) -> Unit, setMap: (Boolean) -> Unit,
-    onHud: () -> Unit, onDevices: () -> Unit, onProfiles: () -> Unit, onModules: () -> Unit, onCommand: () -> Unit, onLive: () -> Unit, onVoice: () -> Unit, onArchive: () -> Unit, onEvents: () -> Unit, onMap: () -> Unit, onDiagnostics: () -> Unit) {
-    AlertDialog(onDismissRequest = onClose, title = { Text("BODYCAM AI", color = Cyan) }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Android 10+ • универсальная система", color = Color.LightGray)
-            MenuToggle("🤖 AI", ai, setAi); MenuToggle("🗺️ Карта", map, setMap)
-            Button(onClick = onProfiles, Modifier.fillMaxWidth()) { Text("🎛 Профили: ${profile.title}") }
-            Button(onClick = onModules, Modifier.fillMaxWidth()) { Text("🧩 Модули") }
-            Button(onClick = onCommand, Modifier.fillMaxWidth()) { Text("🧭 Command / Coordinator") }
-            Button(onClick = onHud, Modifier.fillMaxWidth()) { Text("HUD / конструктор") }
-            Button(onClick = onDevices, Modifier.fillMaxWidth()) { Text("📡 Устройства") }
-            Button(onClick = onLive, Modifier.fillMaxWidth()) { Text("📺 Live View") }
-            Button(onClick = onVoice, Modifier.fillMaxWidth()) { Text("🎙️ P2P голосовая связь") }
-            Text("📡 Медиаканал: адаптивное качество при слабой сети", color = Color.LightGray, fontSize = 11.sp)
-            Button(onClick = onArchive, Modifier.fillMaxWidth()) { Text("📂 Архив") }
-            Button(onClick = onEvents, Modifier.fillMaxWidth()) { Text("🤖 AI-события") }
-            Button(onClick = onMap, Modifier.fillMaxWidth()) { Text("🗺️ Карта и офлайн-регионы") }
-            Button(onClick = onDiagnostics, Modifier.fillMaxWidth()) { Text("📊 Диагностика") }
-        }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
-}
-
-
-@Composable private fun CommandCenterDialog(lat: Double?, lon: Double?, onClose: () -> Unit) {
-    var selectedMember by remember { mutableStateOf<String?>(null) }
-    var message by remember { mutableStateOf("") }
-    var showPermissions by remember { mutableStateOf(false) }
-    var showCreateTask by remember { mutableStateOf(false) }
-    var showInvite by remember { mutableStateOf(false) }
-    val roomCode = remember { (100000..999999).random().toString() }
-    var pendingJoinCode by remember { mutableStateOf("") }
-    val available = remember { mutableStateOf(setOf(ConnectionChannel.MOBILE, ConnectionChannel.INTERNET, ConnectionChannel.WIFI_LOCAL, ConnectionChannel.BLUETOOTH)) }
-    val activeChannel = chooseBestConnection(available.value)
-    val members = remember {
-        mutableStateListOf(
-            TeamMember("1", "Участник 1", ConnectionChannel.MOBILE, true, true, false, 87),
-            TeamMember("2", "Участник 2", ConnectionChannel.INTERNET, true, true, true, 64),
-            TeamMember("3", "Участник 3", ConnectionChannel.WIFI_LOCAL, true, true, false, 91),
-            TeamMember("4", "Участник 4", ConnectionChannel.OFFLINE, false, false, false, 22)
+        FusionState(
+            visionMode = visionMode,
+            trackingEnabled = tracking,
+            worldMarkersEnabled = worldMarkers,
+            rearViewEnabled = rearView,
+            audioDirectionEnabled = audioDirection,
+            minimapEnabled = minimap,
+            latitude = telemetry.latitude,
+            longitude = telemetry.longitude,
+            headingDegrees = telemetry.headingDegrees,
+            locationAccuracyMeters = telemetry.accuracyMeters,
+            sources = sourceStates.values.toList(),
+            fusionConfidence = if (connectedSources.size > 1) 0.92f else 1f,
+            sourceStates = sourceStates
         )
     }
-    val tasks = remember {
-        mutableStateListOf(
-            SharedTask("t1", "Точка A", "Проверить указанную точку", TaskStatus.NEW, "1", lat, lon),
-            SharedTask("t2", "Маршрут B", "Пройти заданный маршрут", TaskStatus.IN_PROGRESS, "2")
-        )
-    }
-    val messages = remember {
-        mutableStateListOf(
-            GroupMessage("m1", "system", "Система", "Группа подключена", MessageType.SYSTEM, channel = activeChannel)
-        )
-    }
-    AlertDialog(onDismissRequest = onClose, title = { Text("COMMAND / COORDINATOR", color = Cyan) }, text = {
-        Column(Modifier.heightIn(max = 620.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Авторизованная группа • координация, связь и обмен данными", color = Color.LightGray, fontSize = 12.sp)
-            Text("🟢 Активный канал: ${activeChannel.title}", color = Green)
-            Text("📡 Доступно: ${available.value.joinToString { it.title }}", color = Color.Gray, fontSize = 10.sp)
-            Text(if (lat != null && lon != null) "📍 Центр: %.5f, %.5f".format(lat, lon) else "📍 Координаты центра недоступны", color = Green)
 
-            Text("Участники", fontWeight = FontWeight.Bold, color = Color.White)
-            LazyColumn(Modifier.heightIn(max = 170.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                items(members) { member ->
-                    Surface(color = Panel, shape = RoundedCornerShape(8.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(8.dp)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("${if (member.online) "🟢" else "🔴"} ${member.name}", color = Color.White)
-                                Text("${member.batteryPercent}%", color = Color.Gray, fontSize = 11.sp)
-                            }
-                            Text("${member.channel.title} • GPS ${if (member.locationShared) "доступен" else "скрыт"} • камера ${if (member.cameraShared) "разрешена" else "закрыта"}", color = Color.LightGray, fontSize = 10.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                OutlinedButton(onClick = { selectedMember = member.id }) { Text("Чат", fontSize = 10.sp) }
-                                OutlinedButton(onClick = { if (member.cameraShared) selectedMember = member.id }) { Text("Камера", fontSize = 10.sp) }
-                                OutlinedButton(onClick = { selectedMember = member.id; showPermissions = true }) { Text("Доступ", fontSize = 10.sp) }
-                            }
-                        }
+    LaunchedEffect(Unit) { performanceState = adaptivePerformance.decide(performanceMonitor.snapshot()) }
+    LaunchedEffect(aiEnabled) { preferences.setAiEnabled(aiEnabled) }
+    LaunchedEffect(mapEnabled) { preferences.setMapEnabled(mapEnabled) }
+    LaunchedEffect(frontCamera) { preferences.setFrontCamera(frontCamera) }
+    LaunchedEffect(selectedProfile) { preferences.setProfile(selectedProfile) }
+    LaunchedEffect(aiAlertsEnabled) { preferences.setAiAlertsEnabled(aiAlertsEnabled) }
+    LaunchedEffect(aiMinConfidence) { preferences.setAiMinConfidence(aiMinConfidence) }
+    LaunchedEffect(aiLabelsEnabled) { preferences.setAiLabelsEnabled(aiLabelsEnabled) }
+    LaunchedEffect(aiContourOnly) { preferences.setAiContourOnly(aiContourOnly) }
+
+    var themePreset by remember { mutableStateOf(preferences.uiTheme()) }
+    CompositionLocalProvider(LocalBodyCamColors provides uiTheme(themePreset)) {
+    MaterialTheme(colorScheme = darkColorScheme(
+        background = LocalBodyCamColors.current.background, surface = LocalBodyCamColors.current.panel, primary = LocalBodyCamColors.current.primary,
+        secondary = LocalBodyCamColors.current.success, error = LocalBodyCamColors.current.danger
+    )) {
+        if (!cameraStarted) {
+            MainShell(
+                screen = screen,
+                selectedProfile = selectedProfile,
+                aiEnabled = aiEnabled,
+                gpsReady = telemetry.gpsReady,
+                networkText = networkState.active.title,
+                onScreen = { screen = it },
+                onStartCamera = { cameraStarted = true },
+                content = {
+                    when (screen) {
+                        AppScreen.HOME -> HomeContent(selectedProfile, aiEnabled, telemetry.gpsReady, networkState.active.title, onStartCamera = { cameraStarted = true }, onProfiles = { screen = AppScreen.PROFILES }, onSensors = { screen = AppScreen.SENSORS }, onAi = { screen = AppScreen.AI }, onMap = { screen = AppScreen.MAP })
+                        AppScreen.PROFILES -> ProfilesContent(selectedProfile) { selectedProfile = it; ProfilePolicy.defaults(it).forEach { module -> preferences.setModuleEnabled(module, true) } }
+                        AppScreen.SENSORS -> SensorsContent(fusion, discoveredSources, onRefresh = { discoveredSources = sensorDiscovery.scan() }, onExternal = { externalCamera = true; screen = AppScreen.HOME }, onCenter = { screen = AppScreen.SENSOR_CENTER })
+                        AppScreen.SENSOR_CENTER -> SensorCenterContent(fusion, fusedFrameState)
+                        AppScreen.AI -> AiContent(aiEnabled, { aiEnabled = it }, tracking, { tracking = it }, worldMarkers, { worldMarkers = it }, aiOverlayMode, { aiOverlayMode = it }, aiAlertsEnabled, { aiAlertsEnabled = it }, aiMinConfidence, { aiMinConfidence = it }, aiLabelsEnabled, { aiLabelsEnabled = it }, aiContourOnly, { aiContourOnly = it })
+                        AppScreen.MAP -> MapContent(telemetry, offlineMaps, mapMode, { mapMode = it }, mapEnabled, { mapEnabled = it })
+                        AppScreen.ARCHIVE -> ArchiveContent()
+                        AppScreen.EVENTS -> EventsContent()
+                        AppScreen.DIAGNOSTICS -> DiagnosticsContent(aiEnabled)
+                        AppScreen.SETTINGS -> SettingsContent(frontCamera, { frontCamera = it }, visionMode, { visionMode = it }, minimap, { minimap = it }, rearView, { rearView = it }, audioDirection, { audioDirection = it }, themePreset, { themePreset = it; preferences.setUiTheme(it) }, performanceState.tier.name, performanceState.reason)
                     }
                 }
-            }
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(onClick = { showCreateTask = true }, Modifier.weight(1f)) { Text("+ Задача") }
-                OutlinedButton(onClick = { showInvite = true }, Modifier.weight(1f)) { Text("🔐 Пригласить") }
-            }
-            Text("Задачи / точки / зоны", fontWeight = FontWeight.Bold, color = Color.White)
-            tasks.forEach { task ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text("📍 ${task.title}", color = Color.White); Text("${task.description} • ${task.assignedMemberId ?: "без назначения"}", color = Color.Gray, fontSize = 10.sp) }
-                    Text(task.status.title, color = if (task.status == TaskStatus.DONE) Green else Amber, fontSize = 10.sp)
-                }
-            }
-
-            Text("Связь", fontWeight = FontWeight.Bold, color = Color.White)
-            LazyColumn(Modifier.heightIn(max = 80.dp)) {
-                items(messages.takeLast(4)) { m ->
-                    Text("${m.senderName}: ${m.text}", color = if (m.type == MessageType.SYSTEM) Color.Gray else Color.White, fontSize = 11.sp)
-                }
-            }
-            OutlinedTextField(value = message, onValueChange = { message = it }, label = { Text(if (selectedMember == null) "Сообщение группе" else "Сообщение участнику") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = {
-                    if (message.isNotBlank()) {
-                        messages += GroupMessage("m${messages.size + 1}", "commander", "Командир", message, channel = activeChannel)
-                        message = ""
-                    }
-                }, Modifier.weight(1f)) { Text("Отправить") }
-                OutlinedButton(onClick = { messages += GroupMessage("m${messages.size + 1}", "commander", "Командир", "Голосовое сообщение", MessageType.VOICE, channel = activeChannel) }, Modifier.weight(1f)) { Text("🎙 Голос") }
-            }
-            Text("📷 Камера доступна только при разрешении участника. Мобильная сеть/интернет — дальний канал при наличии покрытия; Wi‑Fi/Bluetooth — локальные.", color = Color.Gray, fontSize = 10.sp)
+            )
+        } else {
+            CameraScreen(
+                recording = recording,
+                aiEnabled = aiEnabled,
+                frontCamera = frontCamera,
+                externalCamera = externalCamera,
+                selectedProfile = selectedProfile,
+                telemetry = telemetry,
+                aiResult = aiResult,
+                fusion = fusion,
+                fusedFrameState = fusedFrameState,
+                fusionPipeline = fusionPipeline,
+                onRecordingChanged = { recording = it },
+                onCameraError = { cameraError = it },
+                onAiResult = {
+                    val smoothed = if (tracking) aiSmoother.smooth(it) else it
+                    aiResult = smoothed
+                    if (aiEnabled && aiAlertsEnabled) aiAlertEngine.evaluate(smoothed)?.also { alert -> aiAlert = alert }
+                },
+                onCaptureIdChanged = { activeCaptureId = it },
+                onBackHome = { cameraStarted = false; screen = AppScreen.HOME },
+                onPhoto = { RecordingBridge.photo() },
+                onRecord = { if (recording) RecordingBridge.stop() else RecordingBridge.start() },
+                onFlip = { frontCamera = !frontCamera },
+                onAi = { aiEnabled = !aiEnabled },
+                onMode = { showModeSheet = true },
+                onSensors = { showSensorSheet = true },
+                aiOverlayMode = aiOverlayMode
+            )
         }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
 
-    if (showInvite) {
-        InviteDialog(roomCode = roomCode, pendingJoinCode = pendingJoinCode, onJoinCodeChange = { pendingJoinCode = it }, onClose = { showInvite = false })
-    }
-    if (showPermissions && selectedMember != null) {
-        PermissionDialog(member = members.firstOrNull { it.id == selectedMember }, onClose = { showPermissions = false })
-    }
-    if (showCreateTask) {
-        CreateTaskDialog(onClose = { showCreateTask = false }) { title, desc, memberId ->
-            tasks += SharedTask("t${tasks.size + 1}", title, desc, TaskStatus.NEW, memberId, lat, lon)
-            showCreateTask = false
+        if (showSensorSheet) {
+            SensorSheet(fusion, onClose = { showSensorSheet = false })
+        }
+        if (showModeSheet) {
+            VisionModeSheet(visionMode, onSelect = { visionMode = it; showModeSheet = false }, onClose = { showModeSheet = false })
+        }
+        cameraError?.let { error ->
+            AlertDialog(onDismissRequest = { cameraError = null }, title = { Text("Ошибка камеры") }, text = { Text(error) }, confirmButton = { TextButton({ cameraError = null }) { Text("Понятно") } })
         }
     }
-}
-
-
-@Composable private fun InviteDialog(roomCode: String, pendingJoinCode: String, onJoinCodeChange: (String) -> Unit, onClose: () -> Unit) {
-    var copied by remember { mutableStateOf(false) }
-    var joinStatus by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onClose, title = { Text("🔐 Авторизация группы") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Командир-хост", color = Cyan, fontWeight = FontWeight.Bold)
-            Text("Код приглашения", color = Color.Gray, fontSize = 11.sp)
-            Text(roomCode, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            OutlinedButton(onClick = { copied = true }, Modifier.fillMaxWidth()) { Text(if (copied) "Код готов к передаче" else "Скопировать / показать код") }
-            HorizontalDivider()
-            Text("Подключение участника", color = Cyan, fontWeight = FontWeight.Bold)
-            OutlinedTextField(value = pendingJoinCode, onValueChange = onJoinCodeChange, label = { Text("Код группы") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button(onClick = { joinStatus = if (pendingJoinCode == roomCode) "✅ Код принят. Устройство можно авторизовать." else "⚠️ Код не совпадает." }, Modifier.fillMaxWidth()) { Text("Проверить код") }
-            if (joinStatus.isNotBlank()) Text(joinStatus, color = if (joinStatus.startsWith("✅")) Green else Amber, fontSize = 11.sp)
-            Text("Код является локальным приглашением. Настоящая авторизация и шифрованное рукопожатие P2P подключаются следующим сетевым слоем.", color = Color.Gray, fontSize = 10.sp)
-        }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
-}
-
-@Composable private fun PermissionDialog(member: TeamMember?, onClose: () -> Unit) {
-    var location by remember { mutableStateOf(member?.locationShared == true) }
-    var camera by remember { mutableStateOf(member?.cameraShared == true) }
-    var microphone by remember { mutableStateOf(false) }
-    var liveView by remember { mutableStateOf(member?.cameraShared == true) }
-    AlertDialog(onDismissRequest = onClose, title = { Text("Разрешения: ${member?.name ?: "участник"}") }, text = {
-        Column { MenuToggle("📍 Геопозиция", location) { location = it }; MenuToggle("📷 Камера", camera) { camera = it }; MenuToggle("🎙 Микрофон", microphone) { microphone = it }; MenuToggle("📺 Live View", liveView) { liveView = it } }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Сохранить") } })
-}
-
-@Composable private fun CreateTaskDialog(onClose: () -> Unit, onCreate: (String, String, String?) -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var desc by remember { mutableStateOf("") }
-    var member by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onClose, title = { Text("Новая задача / точка") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(title, { title = it }, label = { Text("Название") }, singleLine = true)
-            OutlinedTextField(desc, { desc = it }, label = { Text("Описание") }, singleLine = true)
-            OutlinedTextField(member, { member = it }, label = { Text("ID участника (необязательно)") }, singleLine = true)
-            Text("Задача может быть назначена участнику и позже синхронизирована с группой.", color = Color.Gray, fontSize = 10.sp)
-        }
-    }, confirmButton = { Button(onClick = { if (title.isNotBlank()) onCreate(title, desc, member.ifBlank { null }) }) { Text("Создать") } }, dismissButton = { TextButton(onClick = onClose) { Text("Отмена") } })
-}
-
-@Composable private fun MenuToggle(label: String, checked: Boolean, change: (Boolean) -> Unit) = Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text(label); Switch(checked, change) }
-
-@Composable private fun ProfilesDialog(selected: AppProfile, onSelect: (AppProfile) -> Unit, onClose: () -> Unit) {
-    AlertDialog(onDismissRequest = onClose, title = { Text("Профили") }, text = {
-        LazyVerticalGrid(GridCells.Fixed(2), Modifier.height(360.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(AppProfile.entries) { p -> FilterChip(selected == p, { onSelect(p) }, label = { Text(p.title, fontSize = 12.sp) }) }
-        }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
-}
-
-@Composable private fun ModulesDialog(states: MutableMap<Module, Boolean>, onClose: () -> Unit) {
-    AlertDialog(onDismissRequest = onClose, title = { Text("Модули") }, text = {
-        Column(Modifier.heightIn(max = 480.dp)) { Module.entries.forEach { m -> MenuToggle(m.title, states[m] == true) { states[m] = it } } }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Готово") } })
-}
-
-@Composable private fun DevicesDialog(onClose: () -> Unit) {
-    AlertDialog(onDismissRequest = onClose, title = { Text("Устройства") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("📱 Телефон — основная камера", color = Green)
-            Text("📷 USB / Wi‑Fi / IP-камера — подключение при наличии Android-интерфейса")
-            Text("🥽 AR/XR — камера, HUD и датчики при поддержке устройства")
-            Text("🎙️ Внешний микрофон — доступен через Android audio stack")
-            Text("🛸 Дрон — через поддерживаемый SDK/API; возможности зависят от модели")
-            Text("🔄 Источник можно выбрать автоматически или вручную")
-        }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
 }
 
 @Composable
-private fun VoiceDialog(onClose: () -> Unit) {
-    var connected by remember { mutableStateOf(false) }
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("🎙️ P2P голосовая связь", color = Cyan) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (connected) "🟢 Голосовой канал активен" else "⚪ Голосовой канал не подключён", color = if (connected) Green else Color.LightGray)
-                Text("Запрос связи требует разрешения второго устройства. Реальный аудиотранспорт подключается отдельным media-слоем.", color = Color.Gray, fontSize = 11.sp)
-                Button(onClick = { connected = !connected }, Modifier.fillMaxWidth()) { Text(if (connected) "Остановить" else "Запросить связь") }
+private fun MainShell(
+    screen: AppScreen,
+    selectedProfile: AppProfile,
+    aiEnabled: Boolean,
+    gpsReady: Boolean,
+    networkText: String,
+    onScreen: (AppScreen) -> Unit,
+    onStartCamera: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Scaffold(
+        containerColor = Color.Black,
+        topBar = {
+            Column(Modifier.background(Color.Black)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("BODYCAM AI", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
+                        Text("SENSOR FUSION / ${selectedProfile.title.uppercase()}", color = Cyan, fontSize = 10.sp, letterSpacing = 1.sp)
+                    }
+                    StatusDot("AI", aiEnabled, Cyan)
+                    Spacer(Modifier.width(6.dp))
+                    StatusDot("GPS", gpsReady, Green)
+                    Spacer(Modifier.width(6.dp))
+                    StatusDot("NET", networkText != "Офлайн", Amber)
+                }
+                HorizontalDivider(color = Cyan.copy(alpha = .15f))
             }
         },
-        confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } }
-    )
+        bottomBar = {
+            NavigationBar(containerColor = Color(0xFF0A0E12)) {
+                NavItem("⌂", "Главная", screen == AppScreen.HOME) { onScreen(AppScreen.HOME) }
+                NavItem("◎", "Профили", screen == AppScreen.PROFILES) { onScreen(AppScreen.PROFILES) }
+                NavItem("◈", "Сенсоры", screen == AppScreen.SENSORS || screen == AppScreen.SENSOR_CENTER) { onScreen(AppScreen.SENSORS) }
+                NavItem("⚙", "Настройки", screen == AppScreen.SETTINGS) { onScreen(AppScreen.SETTINGS) }
+            }
+        }
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) { content() }
+    }
 }
 
-@Composable private fun LiveViewDialog(onClose: () -> Unit) {
-    var layout by remember { mutableStateOf("1") }
-    AlertDialog(onDismissRequest = onClose, title = { Text("Live View") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("P2P Live View • только с разрешением владельца камеры", color = Cyan)
-            Text("Окна: $layout", color = Green)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("1", "2", "4", "6", "9").forEach { value ->
-                    OutlinedButton(onClick = { layout = value }) { Text(value) }
+@Composable
+private fun RowScope.NavItem(icon: String, label: String, selected: Boolean, onClick: () -> Unit) {
+    NavigationBarItem(selected = selected, onClick = onClick, icon = { Text(icon, fontSize = 20.sp) }, label = { Text(label, fontSize = 10.sp) })
+}
+
+@Composable
+private fun StatusDot(label: String, active: Boolean, color: Color) {
+    Text(label, color = if (active) color else Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.border(1.dp, color.copy(alpha = .35f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 4.dp))
+}
+
+@Composable
+private fun HomeContent(selectedProfile: AppProfile, ai: Boolean, gps: Boolean, network: String, onStartCamera: () -> Unit, onProfiles: () -> Unit, onSensors: () -> Unit, onAi: () -> Unit, onMap: () -> Unit) {
+    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Surface(color = Panel2, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("ЕДИНАЯ КАРТИНА", color = Cyan, fontWeight = FontWeight.Black, fontSize = 13.sp, letterSpacing = 1.sp)
+                    Text("Камера + AI + GPS + внешние сенсоры", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text("Система объединяет только реально подключённые источники. Тепловизор, дрон и AR/XR добавляются как отдельные модули.", color = Color.LightGray, fontSize = 12.sp)
+                    Button(onClick = onStartCamera, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(14.dp)) { Text("▶  НАЧАТЬ НАБЛЮДЕНИЕ", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
                 }
             }
-            Text("Запрос камеры → участник подтверждает → согласование возможностей → подключение видеопотока.")
-            Text("Аудио запрашивается отдельно. Владелец может остановить поток в любой момент.", color = Color.LightGray, fontSize = 12.sp)
-            Text("Пока реализован P2P-слой согласования; медиакодек/транспорт подключается отдельным модулем.", color = Amber, fontSize = 11.sp)
         }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
-}
-
-@Composable private fun HudEditor(onClose: () -> Unit) {
-    var alpha by remember { mutableFloatStateOf(.85f) }
-    var scale by remember { mutableFloatStateOf(1f) }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(.94f))) {
-        Text("HUD КОНСТРУКТОР", color = Cyan, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.TopCenter).padding(20.dp))
-        Box(Modifier.padding(24.dp).align(Alignment.Center).background(Panel.copy(alpha), RoundedCornerShape(12.dp)).padding(18.dp)) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("● REC   GPS 40.7128°   AI ON", color = Color.White); Text("🧭 125°    🗺️ MAP    ⚠️ EVENTS", color = Cyan); Text("Размер ${"%.1f".format(scale)} • Прозрачность ${"%.0f".format(alpha * 100)}%", color = Color.LightGray) }
-        }
-        Column(Modifier.align(Alignment.BottomCenter).padding(18.dp)) {
-            Text("Размер", color = Color.White); Slider(scale, { scale = it }, valueRange = .7f..1.5f)
-            Text("Прозрачность", color = Color.White); Slider(alpha, { alpha = it }, valueRange = .2f..1f)
-            Button(onClick = onClose, Modifier.fillMaxWidth()) { Text("Готово") }
+        item { QuickCard("ПРОФИЛЬ", selectedProfile.title, "Изменить режим и набор функций", "◎", onProfiles) }
+        item { QuickCard("СЕНСОРЫ", "1 локальный источник", "Подключить внешнюю камеру / тепло / дрон / AR", "◈", onSensors) }
+        item { QuickCard("AI", if (ai) "АКТИВЕН" else "ВЫКЛЮЧЕН", "Объекты • люди • лица • OCR • события", "✦", onAi) }
+        item { QuickCard("НАВИГАЦИЯ", if (gps) "GPS ГОТОВ" else "GPS ПОИСК", "Мини-карта • компас • координаты • офлайн", "⌖", onMap) }
+        item {
+            Surface(color = Panel, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(13.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("СЕТЬ", color = Color.Gray, fontSize = 11.sp); Text(network, color = if (network == "Офлайн") Amber else Green, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
         }
     }
 }
 
+@Composable
+private fun QuickCard(title: String, value: String, desc: String, icon: String, onClick: () -> Unit) {
+    Surface(color = Panel, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(icon, color = Cyan, fontSize = 25.sp, modifier = Modifier.width(42.dp))
+            Column(Modifier.weight(1f)) { Text(title, color = Color.Gray, fontSize = 10.sp); Text(value, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text(desc, color = Color.LightGray, fontSize = 11.sp) }
+            Text("›", color = Cyan, fontSize = 25.sp)
+        }
+    }
+}
 
-@Composable private fun MapDialog(lat: Double?, lon: Double?, heading: Float?, mode: MapMode, setMode: (MapMode) -> Unit, manager: OfflineMapManager, onClose: () -> Unit) {
-    val regions by manager.regions.collectAsState()
-    AlertDialog(onDismissRequest = onClose, title = { Text("КАРТА", color = Cyan) }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (lat != null && lon != null) "📍 %.5f, %.5f".format(lat, lon) else "📍 GPS не получен", color = Color.White)
-            Text("🧭 Курс: ${heading?.roundToInt()?.let { "$it°" } ?: "—"}", color = Cyan)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-                MapMode.values().forEach { m -> FilterChip(selected = mode == m, onClick = { setMode(m) }, label = { Text(m.title, fontSize = 10.sp) }) }
+@Composable
+private fun CameraScreen(
+    recording: Boolean, aiEnabled: Boolean, frontCamera: Boolean, externalCamera: Boolean, selectedProfile: AppProfile,
+    telemetry: com.example.bodycamai.sensors.DeviceTelemetry, aiResult: AiFrameResult, fusion: FusionState, fusedFrameState: com.example.bodycamai.core.FusedFrameState, fusionPipeline: com.example.bodycamai.core.SensorFusionPipeline,
+    onRecordingChanged: (Boolean) -> Unit, onCameraError: (String) -> Unit, onAiResult: (AiFrameResult) -> Unit,
+    onCaptureIdChanged: (String?) -> Unit, onBackHome: () -> Unit, onPhoto: () -> Unit, onRecord: () -> Unit,
+    onFlip: () -> Unit, onAi: () -> Unit, onMode: () -> Unit, onSensors: () -> Unit, aiOverlayMode: AiOverlayMode
+) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        CameraPreview(
+            modifier = Modifier.fillMaxSize(), frontCamera = frontCamera, externalCamera = externalCamera,
+            onRecordingChanged = onRecordingChanged,
+            onError = { onCameraError(it.message ?: "Ошибка камеры") },
+            onAiResult = onAiResult, onCaptureIdChanged = onCaptureIdChanged, fusionPipeline = fusionPipeline
+        )
+        HudOverlay(recording, aiEnabled, aiResult, selectedProfile.title, telemetry, fusion, fusedFrameState, aiOverlayMode, aiAlert)
+        Column(Modifier.align(Alignment.TopCenter).padding(top = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                CameraChip("‹", onBackHome); CameraChip(if (recording) "● REC" else "READY", onRecord, if (recording) Red else Green)
+                CameraChip("AI ${if (aiEnabled) "ON" else "OFF"}", onAi, Cyan); CameraChip(fusion.visionMode.title, onMode, Amber); CameraChip("SENS", onSensors, Cyan)
             }
-            Text(if (regions.any { it.downloaded }) "OFFLINE: доступно" else "OFFLINE: регионы не загружены", color = if (regions.any { it.downloaded }) Green else Amber)
-            Text("Загрузка карт выполняется только вручную. Автоматического скачивания нет.", color = Color.LightGray, fontSize = 12.sp)
-            regions.forEach { region ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(region.name); Text("${region.sizeMb} MB • ${if (region.downloaded) "загружено" else "не загружено"}", color = Color.Gray, fontSize = 11.sp) }
-                    if (region.downloaded) TextButton({ manager.delete(region.id) }) { Text("Удалить") }
-                    else TextButton({ manager.markDownloaded(region.id) }) { Text("Подготовить") }
+        }
+        Row(Modifier.align(Alignment.BottomCenter).padding(18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            CameraButton("📷", "Фото", onPhoto)
+            CameraButton(if (recording) "■" else "●", if (recording) "Стоп" else "Запись", onRecord, if (recording) Red else Green)
+            CameraButton("↻", if (externalCamera) "USB" else "Камера", {
+                if (fusion.source(SensorSource.EXTERNAL_CAMERA).connected) {
+                    externalCamera = !externalCamera
+                } else {
+                    onFlip()
+                }
+            })
+        }
+    }
+}
+
+@Composable
+private fun CameraChip(text: String, onClick: () -> Unit, color: Color = Color.White) {
+    Surface(color = Color.Black.copy(alpha = .78f), shape = RoundedCornerShape(8.dp), modifier = Modifier.clickable(onClick = onClick).border(1.dp, color.copy(alpha = .35f), RoundedCornerShape(8.dp))) { Text(text, color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) }
+}
+
+@Composable
+private fun CameraButton(icon: String, label: String, onClick: () -> Unit, color: Color = Color.White) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
+        Surface(color = Color.Black.copy(alpha = .78f), shape = RoundedCornerShape(50.dp), modifier = Modifier.size(54.dp).border(1.dp, color.copy(alpha = .5f), RoundedCornerShape(50.dp))) { Box(contentAlignment = Alignment.Center) { Text(icon, color = color, fontSize = 21.sp) } }
+        Text(label, color = Color.White, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+@Composable
+private fun ProfilesContent(selected: AppProfile, onSelect: (AppProfile) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { SectionTitle("ПРОФИЛИ", "Каждый профиль меняет набор доступных модулей и HUD.") }
+        items(AppProfile.entries.toList()) { profile ->
+            SelectCard(profile.title, profile == selected, profileDescription(profile)) { onSelect(profile) }
+        }
+    }
+}
+
+private fun profileDescription(p: AppProfile) = when (p) {
+    AppProfile.BODYCAM -> "Запись, AI, GPS, события, архив"
+    AppProfile.CIVILIAN -> "Наблюдение и предупреждения без тактических функций"
+    AppProfile.POLICE -> "Документирование, объекты, лица, номера и проверка разрешённых данных"
+    AppProfile.TACTICAL -> "Мультиисточники, ночной режим, аудио и карта"
+    AppProfile.AIRSOFT -> "Игровые цели, игроки, карта и статистика"
+    AppProfile.TRAINING -> "Тренировочный режим и анализ"
+    AppProfile.SEARCH_RESCUE -> "Поиск, GPS, события, группа и SOS"
+    AppProfile.XR -> "AR/XR HUD и внешние устройства"
+    AppProfile.COMMAND -> "Координация группы и общая карта"
+    AppProfile.CUSTOM -> "Пользовательский набор"
+    AppProfile.ALL -> "Все доступные модули"
+}
+
+@Composable
+private fun SensorsContent(
+    fusion: FusionState,
+    discovered: Map<SensorSource, FusionSource>,
+    onRefresh: () -> Unit,
+    onExternal: () -> Unit,
+    onCenter: () -> Unit
+) {
+    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        item { SectionTitle("SENSOR FUSION", "Только реальные источники: без фиктивного подключения сенсоров.") }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onRefresh, modifier = Modifier.weight(1f)) { Text("⟳ ОБНОВИТЬ") }
+                OutlinedButton(onClick = onCenter, modifier = Modifier.weight(1f)) { Text("SENSOR CENTER") }
+            }
+        }
+        item { MetricCard("Подключено", "${fusion.connectedCount}", "активные источники Fusion") }
+        item { MetricCard("Внешняя камера", if (discovered[SensorSource.EXTERNAL_CAMERA]?.connected == true) "ДОСТУПНА" else "НЕ НАЙДЕНА", "Camera2/CameraX external") }
+        item { MetricCard("Тепловой USB", if (discovered[SensorSource.THERMAL_CAMERA]?.confidence ?: 0f > 0f) "ОБНАРУЖЕН НАМЁК" else "НЕ ОБНАРУЖЕН", "Подключение ещё требует реального SDK/драйвера") }
+        items(SensorSource.entries.toList()) { source ->
+            val live = fusion.source(source).connected
+            val available = discovered[source]?.connected == true
+            Surface(color = Panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (live) "●" else if (available) "◐" else "○", color = if (live) Green else if (available) Amber else Color.Gray, fontSize = 18.sp, modifier = Modifier.width(30.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(source.title, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(sourceDescription(source), color = Color.Gray, fontSize = 10.sp)
+                    }
+                    Text(if (live) "LIVE" else if (available) "READY" else "OFF", color = if (live) Green else if (available) Amber else Color.Gray, fontSize = 10.sp)
                 }
             }
         }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
+        if (discovered[SensorSource.EXTERNAL_CAMERA]?.connected == true) {
+            item {
+                Button(onClick = onExternal, modifier = Modifier.fillMaxWidth()) {
+                    Text("ИСПОЛЬЗОВАТЬ ВНЕШНЮЮ КАМЕРУ")
+                }
+            }
+        }
+        item {
+            Surface(color = Color(0xFF071A1F), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("МОДУЛЬНАЯ СХЕМА", color = Cyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("USB-устройство может быть обнаружено Android, но видео/тепловой канал считается активным только после успешного адаптера и живого потока.", color = Color.LightGray, fontSize = 10.sp)
+                }
+            }
+        }
+    }
 }
 
+@Composable
+private fun SensorCenterContent(fusion: FusionState, frame: FusedFrameState) {
+    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { SectionTitle("SENSOR CENTER", "Состояние источников, частота/задержка и качество Fusion.") }
+        item { MetricCard("Fusion", if (frame.synchronized) "SYNC" else "STANDBY", "Δ ${frame.deltaMs ?: 0} ms • источников ${fusion.connectedCount}") }
+        items(fusion.sources) { source ->
+            Surface(color = Panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(source.source.title, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(if (source.connected) "ONLINE" else "OFFLINE", color = if (source.connected) Green else Color.Gray, fontSize = 10.sp)
+                    }
+                    Text("Confidence: ${"%.0f".format(source.confidence * 100)}%  •  latency: ${source.latencyMs ?: "—"} ms", color = Color.LightGray, fontSize = 11.sp)
+                    if (source.source == SensorSource.AUDIO && fusion.audioDirectionEnabled) {
+                        Text("Направление: требует многомикрофонного/внешнего аудиосенсора", color = Amber, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+        item { Text("REMOTE VIEW: внешний видеопоток появится после подключения совместимого адаптера/SDK. Приложение не имитирует отсутствующее оборудование.", color = Color.Gray, fontSize = 10.sp) }
+    }
+}
 
-@Composable private fun ArchiveDialog(onClose: () -> Unit) {
+private fun sourceDescription(s: SensorSource) = when (s) {
+    SensorSource.PHONE_CAMERA -> "Основной поток CameraX"
+    SensorSource.REAR_CAMERA -> "Задняя камера / второй ракурс при поддерживаемом режиме"
+    SensorSource.EXTERNAL_CAMERA -> "USB / совместимый внешний видеопоток"
+    SensorSource.THERMAL_CAMERA -> "USB / SDK тепловизора"
+    SensorSource.DRONE -> "Поток совместимого устройства через разрешённый API"
+    SensorSource.XR -> "Внешний AR/XR дисплей и сенсоры"
+    SensorSource.AUDIO -> "Микрофон / внешний аудиосенсор"
+}
+
+@Composable
+private fun SensorRow(name: String, connected: Boolean, description: String, onToggle: () -> Unit = {}) {
+    Surface(color = Panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle)) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (connected) "●" else "○", color = if (connected) Green else Color.Gray, fontSize = 18.sp, modifier = Modifier.width(30.dp))
+            Column(Modifier.weight(1f)) { Text(name, color = Color.White, fontWeight = FontWeight.Bold); Text(description, color = Color.Gray, fontSize = 10.sp) }
+            Text(if (connected) "ON" else "OFF", color = if (connected) Green else Color.Gray, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun AiContent(ai: Boolean, setAi: (Boolean) -> Unit, tracking: Boolean, setTracking: (Boolean) -> Unit, markers: Boolean, setMarkers: (Boolean) -> Unit, overlayMode: AiOverlayMode, setOverlayMode: (AiOverlayMode) -> Unit, alerts: Boolean, setAlerts: (Boolean) -> Unit, minConfidence: Float, setMinConfidence: (Float) -> Unit, labels: Boolean, setLabels: (Boolean) -> Unit, contourOnly: Boolean, setContourOnly: (Boolean) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { SectionTitle("AI PERCEPTION", "Включай категории отдельно и не выдавай предположение за факт.") }
+        item { SwitchRow("AI-анализ", "Обработка кадров на устройстве", ai, setAi) }
+        item { SwitchRow("Отслеживание", "Стабильные ID объектов в текущем потоке", tracking, setTracking) }
+        item { SwitchRow("Мировые маркеры", "Показывать обнаружения в HUD", markers, setMarkers) }
+        item { SwitchRow("AI-уведомления", "Показывать события поверх камеры", alerts, setAlerts) }
+        item { SwitchRow("Подписи рамок", "Название и confidence рядом с объектом", labels, setLabels) }
+        item { SwitchRow("Только контур", "Убрать заливку рамки", contourOnly, setContourOnly) }
+        item { Text("МИНИМАЛЬНАЯ УВЕРЕННОСТЬ: ${"%.0f".format(minConfidence * 100)}%", color = Cyan, fontWeight = FontWeight.Bold) }
+        item { Slider(value = minConfidence, onValueChange = setMinConfidence, valueRange = 0.1f..0.95f, steps = 16) }
+        item { Text("РЕЖИМ ОБВОДКИ", color = Cyan, fontWeight = FontWeight.Bold) }
+        item { Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.fillMaxWidth()) { AiOverlayMode.entries.forEach { mode -> FilterChip(selected = overlayMode == mode, onClick = { setOverlayMode(mode) }, label = { Text(mode.title, fontSize = 10.sp) }) } } }
+        items(listOf("Люди", "Лица", "Автомобили", "Номера", "Объекты", "Текст / OCR", "Животные", "Двери / окна", "Свет / вспышки", "События", "Пост-анализ записи", "Описание сцены")) { item -> ToggleLine(item, true) }
+        item { Text("Для лиц и номеров приложение показывает результат обнаружения/сопоставления только при наличии соответствующего источника и разрешённой базы. Автоматическое утверждение о преступлении не используется.", color = Color.Gray, fontSize = 10.sp) }
+    }
+}
+
+@Composable
+private fun MapContent(telemetry: com.example.bodycamai.sensors.DeviceTelemetry, manager: OfflineMapManager, selectedMode: MapMode, setMode: (MapMode) -> Unit, enabled: Boolean, setEnabled: (Boolean) -> Unit) {
+    val regions by manager.regions.collectAsState()
+    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        item { SectionTitle("MAP / NAV", "Мини-карта, компас, GPS и ручная подготовка офлайн-регионов.") }
+        item { SwitchRow("Карта в HUD", "Показывать мини-карту во время наблюдения", enabled, setEnabled) }
+        item { MetricCard("Позиция", telemetry.locationText, "точность ${telemetry.accuracyMeters?.let { "%.1f м".format(it) } ?: "—"}") }
+        item { MetricCard("Курс", telemetry.headingText, "скорость ${telemetry.speedKmh?.let { "%.1f км/ч".format(it) } ?: "—"}") }
+        item { Text("Режимы карты", color = Cyan, fontWeight = FontWeight.Bold) }
+        item { Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) { MapMode.entries.forEach { mode -> FilterChip(selected = selectedMode == mode, onClick = { setMode(mode) }, label = { Text(mode.title, fontSize = 10.sp) }) } } }
+        item { Text("Офлайн-регионы", color = Cyan, fontWeight = FontWeight.Bold) }
+        items(regions) { region ->
+            Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(10.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text(region.name, color = Color.White); Text("${region.sizeMb} MB", color = Color.Gray, fontSize = 10.sp) }
+                Text(if (region.downloaded) "ГОТОВО" else "НЕ ГОТОВО", color = if (region.downloaded) Green else Amber, fontSize = 10.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArchiveContent() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val manager = remember { ArchiveManager(context) }
     var query by remember { mutableStateOf("") }
     var type by remember { mutableStateOf<ArchiveType?>(null) }
-    var onlyEvents by remember { mutableStateOf(false) }
     var refresh by remember { mutableIntStateOf(0) }
-    val items = remember(query, type, onlyEvents, refresh) { manager.query(com.example.bodycamai.archive.ArchiveFilter(query, type, if (onlyEvents) true else null)) }
-    AlertDialog(onDismissRequest = onClose, title = { Text("АРХИВ", color = Cyan) }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Поиск") }, singleLine = true)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                FilterChip(type == null, { type = null }, label = { Text("Все") })
-                FilterChip(type == ArchiveType.VIDEO, { type = ArchiveType.VIDEO }, label = { Text("Видео") })
-                FilterChip(type == ArchiveType.PHOTO, { type = ArchiveType.PHOTO }, label = { Text("Фото") })
-                FilterChip(onlyEvents, { onlyEvents = !onlyEvents }, label = { Text("AI-события") })
-            }
-            Text("Найдено: ${items.size}", color = Color.LightGray)
-            if (items.isEmpty()) Text("Записей BodyCam AI пока нет.", color = Amber)
-            else LazyColumn(Modifier.heightIn(max = 330.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                items(items) { item ->
-                    Surface(color = Panel, shape = RoundedCornerShape(8.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(9.dp)) {
-                            Text(if (item.type == ArchiveType.VIDEO) "🎥 ${item.name}" else "📷 ${item.name}", color = Color.White)
-                            Text(item.formattedDate(), color = Cyan, fontSize = 11.sp)
-                            Text("${item.sizeBytes / 1024 / 1024} MB • ${item.mimeType}", color = Color.Gray, fontSize = 11.sp)
-                            if (item.aiEventCount > 0) Text("🤖 AI-событий: ${item.aiEventCount} • capture ${item.captureId}", color = Green, fontSize = 11.sp)
-                            else Text("🤖 AI-событий: нет", color = Color.Gray, fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
-            OutlinedButton(onClick = { refresh++ }, Modifier.fillMaxWidth()) { Text("Обновить") }
-        }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
+    val itemsFound = remember(query, type, refresh) { manager.query(com.example.bodycamai.archive.ArchiveFilter(query, type, null)) }
+    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { SectionTitle("АРХИВ", "Видео, фото и связанные AI-события.") }
+        item { OutlinedTextField(query, { query = it }, label = { Text("Поиск") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) { FilterChip(type == null, { type = null }, label = { Text("Все") }); FilterChip(type == ArchiveType.VIDEO, { type = ArchiveType.VIDEO }, label = { Text("Видео") }); FilterChip(type == ArchiveType.PHOTO, { type = ArchiveType.PHOTO }, label = { Text("Фото") }) } }
+        item { Text("Найдено: ${itemsFound.size}", color = Color.Gray) }
+        items(itemsFound) { item -> Surface(color = Panel, shape = RoundedCornerShape(10.dp)) { Column(Modifier.fillMaxWidth().padding(10.dp)) { Text(item.name, color = Color.White); Text(item.formattedDate(), color = Cyan, fontSize = 10.sp); Text("${item.sizeBytes / 1024 / 1024} MB", color = Color.Gray, fontSize = 10.sp) } } }
+        item { OutlinedButton({ refresh++ }, Modifier.fillMaxWidth()) { Text("Обновить") } }
+    }
 }
 
-@Composable private fun AiEventsDialog(onClose: () -> Unit) {
+@Composable
+private fun EventsContent() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val store = remember { AiEventStore(context) }
     var refresh by remember { mutableIntStateOf(0) }
     val events = remember(refresh) { store.list() }
-    AlertDialog(onDismissRequest = onClose, title = { Text("AI-СОБЫТИЯ", color = Cyan) }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("События сохраняются локально вместе со временем и GPS.", color = Color.LightGray, fontSize = 12.sp)
-            Text("Найдено: ${events.size}", color = Green)
-            if (events.isEmpty()) Text("Пока нет распознанных событий.", color = Amber)
-            else LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                items(events) { e ->
-                    Surface(color = Panel, shape = RoundedCornerShape(8.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(9.dp)) {
-                            Text(SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault()).format(Date(e.timestamp)), color = Cyan)
-                            Text("Объектов: ${e.objectCount} • лиц: ${e.faceCount} • уверенность: ${"%.0f".format(e.maxConfidence * 100)}%", color = Color.White, fontSize = 12.sp)
-                            e.captureId?.let { Text("🎥 Связь с записью: $it", color = Green, fontSize = 10.sp) }
-                            if (e.latitude != null && e.longitude != null) Text("📍 %.5f, %.5f".format(e.latitude, e.longitude), color = Green, fontSize = 11.sp)
-                            if (e.ocr.isNotBlank()) Text("OCR: ${e.ocr}", color = Color.LightGray, fontSize = 11.sp, maxLines = 2)
-                        }
-                    }
-                }
-            }
-            OutlinedButton(onClick = { refresh++ }, Modifier.fillMaxWidth()) { Text("Обновить") }
-        }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
+    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { SectionTitle("AI EVENTS", "Хронология обнаружений с временем и GPS.") }
+        item { Text("Событий: ${events.size}", color = Green) }
+        items(events) { e -> Surface(color = Panel, shape = RoundedCornerShape(10.dp)) { Column(Modifier.padding(10.dp)) { Text(SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault()).format(Date(e.timestamp)), color = Cyan); Text("Объекты ${e.objectCount} • лица ${e.faceCount} • conf ${"%.0f".format(e.maxConfidence * 100)}%", color = Color.White, fontSize = 11.sp); e.latitude?.let { lat -> Text("GPS %.5f, %.5f".format(lat, e.longitude ?: 0.0), color = Green, fontSize = 10.sp) } } } }
+        item { OutlinedButton({ refresh++ }, Modifier.fillMaxWidth()) { Text("Обновить") } }
+    }
 }
 
-@Composable private fun DiagnosticsDialog(onClose: () -> Unit) {
+@Composable
+private fun DiagnosticsContent(ai: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val r = remember { Diagnostics.run(context, true) }
-    AlertDialog(onDismissRequest = onClose, title = { Text("Диагностика") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Камера: ${ok(r.camera)}"); Text("Микрофон: ${ok(r.microphone)}"); Text("GPS: ${ok(r.gps)}"); Text("Компас: ${ok(r.compass)}")
-            Text("Память: ${ok(r.storage)}"); Text("AI: ${ok(r.ai)}"); Text("Сеть: ${ok(r.network)}"); Text("ИТОГ: ${ok(r.overall)}")
-        }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
+    var refresh by remember { mutableIntStateOf(0) }
+    val r = remember(refresh, ai) { Diagnostics.run(context, ai) }
+    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { SectionTitle("ДИАГНОСТИКА", "Проверка основных подсистем перед работой.") }
+        item { CheckLine("Камера", r.camera) }; item { CheckLine("Микрофон", r.microphone) }; item { CheckLine("GPS", r.gps) }; item { CheckLine("Компас", r.compass) }; item { CheckLine("Хранилище", r.storage) }; item { CheckLine("AI", r.ai) }; item { CheckLine("Сеть", r.network) }
+        item { MetricCard("ИТОГ", if (r.overall) "OK" else "ТРЕБУЕТ ВНИМАНИЯ", "повторить проверку после изменения разрешений") }
+        item { Button({ refresh++ }, Modifier.fillMaxWidth()) { Text("Повторить") } }
+    }
 }
 
-private fun ok(v: Boolean) = if (v) "OK" else "НЕДОСТУПНО"
+@Composable
+private fun SettingsContent(front: Boolean, setFront: (Boolean) -> Unit, mode: VisionMode, setMode: (VisionMode) -> Unit, minimap: Boolean, setMinimap: (Boolean) -> Unit, rear: Boolean, setRear: (Boolean) -> Unit, audio: Boolean, setAudio: (Boolean) -> Unit, theme: UiThemePreset, setTheme: (UiThemePreset) -> Unit, performanceTier: String, performanceReason: String) {
+    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { SectionTitle("НАСТРОЙКИ", "Главные параметры BodyCam AI и HUD.") }
+        item { SwitchRow("Фронтальная камера", "Использовать переднюю камеру", front, setFront) }
+        item { SwitchRow("Мини-карта", "Показывать карту в рабочем HUD", minimap, setMinimap) }
+        item { SwitchRow("Задний обзор", "Резерв под подключаемую rear/side камеру", rear, setRear) }
+        item { SwitchRow("Направление звука", "Использовать доступные аудиоданные для приблизительного направления", audio, setAudio) }
+        item { Text("ПРОИЗВОДИТЕЛЬНОСТЬ", color = Cyan, fontWeight = FontWeight.Bold) }
+        item { MetricCard("Адаптивный режим", performanceTier, performanceReason) }
+        item { Text("Система автоматически снижает частоту AI-анализа и число одновременно отображаемых объектов при высокой нагрузке.", color = Color.Gray, fontSize = 10.sp) }
+        item { Text("ТЕМА HUD", color = Cyan, fontWeight = FontWeight.Bold) }
+        items(UiThemePreset.entries.toList()) { t -> SelectCard(t.name, t == theme, "Цвет окон, HUD, статусов и подсветки") { setTheme(t) } }
+        item { Text("Базовая тема — тёмный полупрозрачный HUD в стиле EagleEye; цвета можно менять без изменения логики приложения.", color = Color.Gray, fontSize = 10.sp) }
+        item { Text("Режим изображения", color = Cyan, fontWeight = FontWeight.Bold) }
+        items(VisionMode.entries.toList()) { v -> SelectCard(v.title, v == mode, visionDescription(v)) { setMode(v) } }
+        item { Text("Тепловой и ночной режимы требуют соответствующего сенсора. Интерфейс не имитирует наличие отсутствующего оборудования.", color = Color.Gray, fontSize = 10.sp) }
+        item { Text("Безопасность", color = Cyan, fontWeight = FontWeight.Bold) }
+        item { Text("Система предназначена для наблюдения и ситуационной осведомлённости. Нет баллистических расчётов, наведения или автономного управления оружием.", color = Color.LightGray, fontSize = 11.sp) }
+    }
+}
 
-@Composable private fun StatusPill(text: String, color: Color) { Surface(color = Color.Black.copy(.72f), shape = RoundedCornerShape(10.dp)) { Text(text, color = color, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) } }
+private fun visionDescription(v: VisionMode) = when (v) {
+    VisionMode.AUTO -> "Автоматически выбирает доступные источники; не создаёт отсутствующий сенсор"
+    VisionMode.DAY -> "Обычный поток камеры"
+    VisionMode.LOW_LIGHT -> "Низкая освещённость / ночной сенсор"
+    VisionMode.THERMAL -> "Реальный внешний тепловой канал"
+    VisionMode.FUSED -> "Объединение доступных визуальных источников"
+}
+
+@Composable
+private fun SectionTitle(title: String, subtitle: String) { Column(Modifier.padding(bottom = 4.dp)) { Text(title, color = Cyan, fontWeight = FontWeight.Black, fontSize = 14.sp, letterSpacing = 1.sp); Text(subtitle, color = Color.Gray, fontSize = 11.sp) } }
+
+@Composable
+private fun MetricCard(title: String, value: String, subtitle: String) { Surface(color = Panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) { Text(title, color = Color.Gray, fontSize = 10.sp); Text(value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold); Text(subtitle, color = Color.LightGray, fontSize = 10.sp) } } }
+
+@Composable
+private fun SelectCard(title: String, selected: Boolean, description: String, onClick: () -> Unit) { Surface(color = if (selected) Color(0xFF09262D) else Panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).border(1.dp, if (selected) Cyan.copy(alpha = .55f) else Color.White.copy(alpha = .08f), RoundedCornerShape(12.dp))) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text(if (selected) "●" else "○", color = if (selected) Cyan else Color.Gray, modifier = Modifier.width(28.dp)); Column(Modifier.weight(1f)) { Text(title, color = Color.White, fontWeight = FontWeight.Bold); Text(description, color = Color.Gray, fontSize = 10.sp) } } } }
+
+@Composable
+private fun SwitchRow(title: String, description: String, checked: Boolean, onChecked: (Boolean) -> Unit) { Surface(color = Panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp); Text(description, color = Color.Gray, fontSize = 10.sp) }; Switch(checked, onCheckedChange = onChecked) } } }
+
+@Composable
+private fun ToggleLine(title: String, enabled: Boolean) { Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) { Text(title, color = Color.White, modifier = Modifier.weight(1f)); Text(if (enabled) "ON" else "OFF", color = Green, fontSize = 10.sp) } }
+
+@Composable
+private fun CheckLine(title: String, ok: Boolean) { Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(10.dp)).padding(11.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(title, color = Color.White); Text(if (ok) "OK" else "НЕТ", color = if (ok) Green else Amber, fontWeight = FontWeight.Bold) } }
+
+@Composable
+private fun SensorSheet(fusion: FusionState, onClose: () -> Unit) { AlertDialog(onDismissRequest = onClose, title = { Text("SENSOR FUSION", color = Cyan) }, text = { Column(verticalArrangement = Arrangement.spacedBy(7.dp)) { Text("Локальная камера: подключена", color = Green); Text("Тепловой канал: ${if (fusion.thermalAvailable) "готов" else "не подключён"}"); Text("Внешнее видео: ${if (fusion.externalVideoAvailable) "готово" else "ожидание"}"); Text("Смысл режима FUSED — объединять реальные источники, а не рисовать несуществующие данные.", color = Color.Gray, fontSize = 11.sp) } }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } }) }
+
+@Composable
+private fun VisionModeSheet(mode: VisionMode, onSelect: (VisionMode) -> Unit, onClose: () -> Unit) { AlertDialog(onDismissRequest = onClose, title = { Text("РЕЖИМ ВИДЕНИЯ", color = Cyan) }, text = { Column(verticalArrangement = Arrangement.spacedBy(5.dp)) { VisionMode.entries.forEach { v -> SelectCard(v.title, v == mode, visionDescription(v)) { onSelect(v) } } } }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } }) }

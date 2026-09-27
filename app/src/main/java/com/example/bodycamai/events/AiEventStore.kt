@@ -53,6 +53,10 @@ class AiEventStore(private val context: Context) {
 
     fun forCapture(captureId: String): List<AiEvent> = list(1000).filter { it.captureId == captureId }
 
+    fun clear() { if (file.exists()) file.delete() }
+
+    fun exportJson(): String = loadRaw().toString(2)
+
     fun countForCapture(captureId: String): Int = forCapture(captureId).size
 
     private fun loadRaw(): JSONArray = if (file.exists()) runCatching { JSONArray(file.readText()) }.getOrDefault(JSONArray()) else JSONArray()
