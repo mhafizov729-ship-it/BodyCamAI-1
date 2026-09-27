@@ -77,7 +77,7 @@ class DeviceTelemetryManager(context: Context) : SensorEventListener, LocationLi
         _state.value = _state.value.copy(headingDegrees = degrees)
     }
 
-    override fun onLocationChanged(location: Location) {
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) { }\n\n    override fun onLocationChanged(location: Location) {
         _state.value = _state.value.copy(
             latitude = location.latitude,
             longitude = location.longitude,

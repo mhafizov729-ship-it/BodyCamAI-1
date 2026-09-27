@@ -65,10 +65,10 @@ class DirectPeerTransport : PeerTransport {
     }
 
     override suspend fun send(payload: ByteArray): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching { socket?.getOutputStream()?.apply { write(payload); flush() } ?: error("Нет P2P-соединения") }
+        runCatching { socket?.getOutputStream()?.apply { write(payload); flush() }?.let { Unit } ?: error("Нет P2P-соединения") }
     }
 
-    override suspend fun close() = withContext(Dispatchers.IO) { runCatching { socket?.close() }; socket = null }
+    override suspend fun close() { withContext(Dispatchers.IO) { runCatching { socket?.close() } }; socket = null }
 }
 
 
@@ -83,5 +83,5 @@ class SecureDirectPeerTransport(private val roomCode: String) : PeerTransport {
         session?.send(payload) ?: error("Нет защищённого P2P-соединения")
     }
 
-    override suspend fun close() = runCatching { session?.close() }.also { session = null }
+    override suspend fun close() { runCatching { session?.close() }; session = null }
 }
