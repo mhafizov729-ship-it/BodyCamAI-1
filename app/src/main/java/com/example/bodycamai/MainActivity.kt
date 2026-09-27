@@ -212,10 +212,12 @@ private fun BodyCamApp() {
                 onPhoto = { RecordingBridge.photo() },
                 onRecord = { if (recording) RecordingBridge.stop() else RecordingBridge.start() },
                 onFlip = { frontCamera = !frontCamera },
+                onExternalCameraChanged = { externalCamera = it },
                 onAi = { aiEnabled = !aiEnabled },
                 onMode = { showModeSheet = true },
                 onSensors = { showSensorSheet = true },
-                aiOverlayMode = aiOverlayMode
+                aiOverlayMode = aiOverlayMode,
+                aiAlert = aiAlert
             )
         }
 
@@ -328,7 +330,7 @@ private fun CameraScreen(
     telemetry: com.example.bodycamai.sensors.DeviceTelemetry, aiResult: AiFrameResult, fusion: FusionState, fusedFrameState: com.example.bodycamai.core.FusedFrameState, fusionPipeline: com.example.bodycamai.core.SensorFusionPipeline,
     onRecordingChanged: (Boolean) -> Unit, onCameraError: (String) -> Unit, onAiResult: (AiFrameResult) -> Unit,
     onCaptureIdChanged: (String?) -> Unit, onBackHome: () -> Unit, onPhoto: () -> Unit, onRecord: () -> Unit,
-    onFlip: () -> Unit, onAi: () -> Unit, onMode: () -> Unit, onSensors: () -> Unit, aiOverlayMode: AiOverlayMode
+    onFlip: () -> Unit, onExternalCameraChanged: (Boolean) -> Unit, onAi: () -> Unit, onMode: () -> Unit, onSensors: () -> Unit, aiOverlayMode: AiOverlayMode, aiAlert: AiAlert?
 ) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         CameraPreview(
@@ -349,7 +351,7 @@ private fun CameraScreen(
             CameraButton(if (recording) "■" else "●", if (recording) "Стоп" else "Запись", onRecord, if (recording) Red else Green)
             CameraButton("↻", if (externalCamera) "USB" else "Камера", {
                 if (fusion.source(SensorSource.EXTERNAL_CAMERA).connected) {
-                    externalCamera = !externalCamera
+                    onExternalCameraChanged(!externalCamera)
                 } else {
                     onFlip()
                 }
