@@ -86,8 +86,8 @@ class DeviceTelemetryManager(context: Context) : SensorEventListener, LocationLi
             accuracyMeters = if (location.hasAccuracy()) location.accuracy else null,
             speedMps = if (location.hasSpeed()) location.speed else null,
             gpsReady = true
-    }
         )
+    }
     override fun onProviderEnabled(provider: String) { }
     override fun onProviderDisabled(provider: String) { _state.value = _state.value.copy(gpsReady = false) }
     override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) { }
