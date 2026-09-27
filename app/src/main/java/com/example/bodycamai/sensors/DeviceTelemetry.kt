@@ -78,12 +78,15 @@ class DeviceTelemetryManager(context: Context) : SensorEventListener, LocationLi
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) { }
+
+    override fun onLocationChanged(location: Location) {
         _state.value = _state.value.copy(
             latitude = location.latitude,
             longitude = location.longitude,
             accuracyMeters = if (location.hasAccuracy()) location.accuracy else null,
             speedMps = if (location.hasSpeed()) location.speed else null,
             gpsReady = true
+        )
         )
     }
     override fun onProviderEnabled(provider: String) { }
