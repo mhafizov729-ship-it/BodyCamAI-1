@@ -67,7 +67,7 @@ class LanPeerDiscovery(private val context: Context) {
                     cont.resume(PeerEndpoint(
                         host = serviceInfo.host?.hostAddress ?: return,
                         port = serviceInfo.port,
-                        channel = com.example.bodycamai.core.ConnectionChannel.WIFI,
+                        channel = com.example.bodycamai.core.ConnectionChannel.WIFI_LOCAL,
                         advertisedName = serviceInfo.serviceName
                     ))
                 }

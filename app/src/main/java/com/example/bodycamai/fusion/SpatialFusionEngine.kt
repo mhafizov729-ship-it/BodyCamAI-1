@@ -54,8 +54,8 @@ class SpatialFusionEngine(
         return (maxProjectionDistanceMeters * (1f - normalized)).coerceIn(1f, maxProjectionDistanceMeters)
     }
 
-    private fun project(lat: Double?, lon: Double?, bearing: Float?, distanceMeters: Float): Pair<Double, Double>? {
-        if (lat == null || lon == null || bearing == null) return null
+    private fun project(lat: Double?, lon: Double?, bearing: Float?, distanceMeters: Float?): Pair<Double, Double>? {
+        if (lat == null || lon == null || bearing == null || distanceMeters == null) return null
         val earth = 6_371_000.0
         val br = Math.toRadians(bearing.toDouble())
         val dLat = distanceMeters * cos(br) / earth

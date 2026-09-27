@@ -65,7 +65,12 @@ class DirectPeerTransport : PeerTransport {
     }
 
     override suspend fun send(payload: ByteArray): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching { socket?.getOutputStream()?.apply { write(payload); flush() } ?: error("Нет P2P-соединения") }
+        runCatching {
+            val output = socket?.getOutputStream() ?: error("Нет P2P-соединения")
+            output.write(payload)
+            output.flush()
+            Unit
+        }
     }
 
     override suspend fun close() {

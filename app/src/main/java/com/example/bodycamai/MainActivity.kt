@@ -626,3 +626,4 @@ private fun SensorSheet(fusion: FusionState, onClose: () -> Unit) { AlertDialog(
 
 @Composable
 private fun VisionModeSheet(mode: VisionMode, onSelect: (VisionMode) -> Unit, onClose: () -> Unit) { AlertDialog(onDismissRequest = onClose, title = { Text("РЕЖИМ ВИДЕНИЯ", color = Cyan) }, text = { Column(verticalArrangement = Arrangement.spacedBy(5.dp)) { VisionMode.entries.forEach { v -> SelectCard(v.title, v == mode, visionDescription(v)) { onSelect(v) } } } }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } }) }
+}
